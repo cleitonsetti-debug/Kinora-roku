@@ -5,7 +5,7 @@ busca, temporadas/episódios, escolha de fonte, player e "Continuar assistindo".
 
 ## O que há de novo na v1.5
 
-Resumo do que foi adicionado nesta série (1.5.0, 1.5.1 e 1.5.2). Os detalhes por versão estão no `CHANGELOG.md`.
+Resumo do que foi adicionado nesta série (1.5.0 a 1.5.3). Os detalhes por versão estão no `CHANGELOG.md`.
 
 ### Perfis ("Quem está assistindo?")
 - Tela de escolha de perfil ao abrir o app (aparece quando existe mais de um perfil). Até **6 perfis**, cada um com
@@ -29,7 +29,13 @@ Resumo do que foi adicionado nesta série (1.5.0, 1.5.1 e 1.5.2). Os detalhes po
 ### Player (estilo Netflix/YouTube)
 - Esquerda/Direita **pulam na hora** (10, 15 ou 30 s, configurável; acelera se você repetir ou segurar) mostrando só a
   barra vermelha com os tempos. OK pausa mostrando só a barra e um ícone grande de pausa.
-- **Baixo** abre os controles completos (-/+ salto, pausar, Ir para, legendas, áudio, próximo episódio, fonte).
+- **Baixo** abre os controles completos (-/+ salto, pausar, Ir para, legendas, áudio, qualidade, velocidade,
+  para nerds, próximo episódio, fonte).
+- **Qualidade** (1.5.3): em HLS/DASH limita a resolução (Automática, Até 1080p/720p/480p); também lista outras fontes do
+  mesmo título com outra qualidade e troca continuando do mesmo ponto.
+- **Velocidade** (1.5.3): 0,5x a 2x. Só aparece nos modelos de Roku que têm esse recurso (o Roku não o oferece em todos).
+- **Para nerds** (1.5.3): resolução, codecs, taxa do vídeo, velocidade da conexão, buffer, formato e servidor, atualizado
+  a cada segundo.
   **Ir para** (ou Cima nos controles) escolhe um ponto na barra e confirma com OK.
 - Não há miniaturas de quadro ao mover a barra: elas dependem de arquivos de pré-visualização que streams comuns não têm.
 

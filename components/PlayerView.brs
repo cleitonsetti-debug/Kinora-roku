@@ -6,7 +6,8 @@
 '                         Esquerda/Direita = pula 10 s (acelera se repetir) mostrando SO a barra
 '                         vermelha com os tempos, como Netflix/YouTube   Voltar = sair
 '  Controles visiveis:    Esquerda/Direita escolhem o botao, OK ativa
-'                         (-10 s, pausar, +10 s, legendas, audio, proximo ep., fonte)
+'                         (-10 s, pausar, +10 s, legendas, audio, qualidade, velocidade,
+'                          para nerds, proximo ep., fonte)
 '                         Cima = barra de tempo; Voltar = esconder
 '  Barra de tempo: Esquerda/Direita pulam NA HORA (1o toque imediato, depois a cada 0,45 s);
 '                  pelos controles (Cima) o ponto so vale ao confirmar com OK; Voltar cancela
@@ -103,6 +104,11 @@ sub init()
     m.scrubDir = 0
     m.scrubAt = 0
     m.lastSeekAt = -100000
+    ' qualidade / velocidade / "para nerds"
+    m.resumeAt = 0
+    m.skipIntro = false
+    m.maxRes = 0
+    m.speed = 1.0
     m.clock = CreateObject("roTimespan")
     m.clock.Mark()
 
@@ -240,10 +246,15 @@ sub startPlayback()
     content.title = displayTitle()
     if r.format <> "" then content.streamFormat = r.format
 
-    if m.global.optResume = true then
+    if m.resumeAt > 0 then
+        ' troca de qualidade/fonte: continua do mesmo ponto
+        content.playStart = m.resumeAt
+        m.resumeAt = 0
+    else if m.global.optResume = true then
         posSec = getSavedPosition(r.videoId)
         if posSec > 0 then content.playStart = posSec
     end if
+    applyMaxRes()
 
     if Type(r.headers) = "roArray" then
         if r.headers.count() > 0 then content.httpHeaders = r.headers
@@ -253,10 +264,13 @@ sub startPlayback()
     if tracks.count() > 0 then content.subtitleTracks = tracks
 
     m.switching = false
-    m.introShown = false
+    ' troca de qualidade no meio do video: nao mostra a ficha de abertura de novo
+    m.introShown = m.skipIntro
+    m.skipIntro = false
     m.intro.visible = false
     m.video.content = content
     m.video.control = "play"
+    applySpeed()
     m.bufferTimer.control = "stop"
     m.bufferTimer.control = "start"
     hideControls()
@@ -626,6 +640,9 @@ sub refreshButtons()
     addButton(content, [], actions, i18n("player_goto"), "ic_scrub", "scrub")
     addButton(content, [], actions, i18n("player_subs"), "ic_subs", "subs")
     addButton(content, [], actions, i18n("player_audio"), "ic_audio", "audio")
+    addButton(content, [], actions, i18n("player_quality"), "ic_quality", "quality")
+    if speedSupported() then addButton(content, [], actions, i18n("player_speed"), "ic_speed", "speed")
+    addButton(content, [], actions, i18n("player_stats"), "ic_stats", "stats")
     if m.nextEp <> invalid then addButton(content, [], actions, i18n("player_next_short"), "ic_next", "next")
     addButton(content, [], actions, i18n("player_source"), "ic_info", "info")
 
@@ -739,6 +756,12 @@ sub onButtonSelected()
         playNext()
     else if act = "info" then
         openInfoPanel()
+    else if act = "quality" then
+        openQualityPanel()
+    else if act = "speed" then
+        openSpeedPanel()
+    else if act = "stats" then
+        openStatsPanel()
     end if
 end sub
 
@@ -842,6 +865,7 @@ end sub
 ' Proximo episodio
 ' ---------------------------------------------------------------------------
 sub onTick()
+    if m.panelOpen and m.panelMode = "stats" then m.panelInfo.text = statsText()
     if m.ctrlVisible or m.mini then updateProgress()
     if m.panelOpen or m.switching or m.ctrlVisible or m.scrubbing or m.mini then return
     if m.nextEp = invalid then return
@@ -1057,6 +1081,12 @@ sub onMenuSelected()
                 saveTrackPref(m.titleId, "subLang", code)
             end if
         end if
+    else if m.panelMode = "quality" then
+        onQualityChosen(act)
+    else if m.panelMode = "speed" then
+        m.speed = Val(act)
+        applySpeed()
+        showToast(speedLabel(m.speed))
     else if m.panelMode = "audio" then
         if act <> "none" then
             m.video.audioTrack = act
@@ -1068,6 +1098,226 @@ sub onMenuSelected()
         end if
     end if
     closePanel()
+end sub
+
+' ---------------------------------------------------------------------------
+' Qualidade, velocidade e "para nerds" (como no YouTube)
+' ---------------------------------------------------------------------------
+function qualityName(q as Integer) as String
+    if q >= 2160 then return "4K"
+    if q > 0 then return Str(q).trim() + "p"
+    return "?"
+end function
+
+' Resolucao em uso agora (do segmento tocando; senao, a do nome da fonte)
+function currentHeight() as Integer
+    seg = m.video.streamingSegment
+    if Type(seg) = "roAssociativeArray" then
+        h = toInt(seg.height)
+        if h > 0 then return h
+    end if
+    seg = m.video.downloadedSegment
+    if Type(seg) = "roAssociativeArray" then
+        h = toInt(seg.Height)
+        if h > 0 then return h
+    end if
+    if m.altIdx >= 0 and m.altIdx < m.alts.count() then return toInt(m.alts[m.altIdx].quality)
+    return 0
+end function
+
+function isAdaptive() as Boolean
+    f = asStr(m.req.format)
+    return (f = "hls" or f = "dash")
+end function
+
+' Limite de resolucao (so vale para HLS/DASH, que trocam de qualidade sozinhos)
+sub applyMaxRes()
+    if not m.video.hasField("maxVideoDecodeResolution") then return
+    if m.maxRes <= 0 then
+        m.video.maxVideoDecodeResolution = [0, 0]
+    else
+        w = Int(m.maxRes * 16 / 9)
+        m.video.maxVideoDecodeResolution = [w, m.maxRes]
+    end if
+end sub
+
+sub openQualityPanel()
+    m.panelMode = "quality"
+    m.panelTitle.text = i18n("player_quality")
+    labels = []
+    actions = []
+    info = trf("q_now", qualityName(currentHeight()))
+
+    if isAdaptive() then
+        lbl = i18n("q_auto")
+        if m.maxRes <= 0 then lbl = lbl + i18n("q_current")
+        labels.push(lbl)
+        actions.push("res:0")
+        for each q in [1080, 720, 480]
+            lbl = trf("q_upto", qualityName(q))
+            if m.maxRes = q then lbl = lbl + i18n("q_current")
+            labels.push(lbl)
+            actions.push("res:" + Str(q).trim())
+        end for
+    end if
+
+    ' outras fontes da lista com outra qualidade (uma por qualidade)
+    seen = {}
+    curQ = 0
+    if m.altIdx >= 0 and m.altIdx < m.alts.count() then curQ = toInt(m.alts[m.altIdx].quality)
+    seen[Str(curQ).trim()] = true
+    for i = 0 to m.alts.count() - 1
+        q = toInt(m.alts[i].quality)
+        k = Str(q).trim()
+        if i <> m.altIdx and q > 0 and not seen.doesExist(k) and labels.count() < 7 then
+            seen[k] = true
+            labels.push(trf("q_source", qualityName(q)))
+            actions.push("alt:" + Str(i).trim())
+        end if
+    end for
+
+    if labels.count() = 0 then
+        info = info + Chr(10) + Chr(10) + i18n("q_none")
+        labels.push(i18n("player_close"))
+        actions.push("close")
+    else
+        info = info + Chr(10) + Chr(10) + i18n("q_hint")
+    end if
+    m.panelInfo.text = info
+    fillMenu(labels, actions)
+    openPanelNow()
+end sub
+
+sub onQualityChosen(act as String)
+    if startsWith(act, "res:") then
+        m.maxRes = toInt(Mid(act, 5))
+        reloadHere(false)
+    else if startsWith(act, "alt:") then
+        idx = toInt(Mid(act, 5))
+        if idx < 0 or idx >= m.alts.count() then return
+        s = m.alts[idx]
+        m.altIdx = idx
+        m.altTries = 0
+        m.req.url = s.url
+        m.req.format = guessStreamFormat(s.url)
+        m.req.headers = s.headers
+        m.req.source = { addonName: s.addonName, addonUrl: s.addonUrl, label: s.title }
+        m.streamSubs = s.subs
+        m.preferAddonUrl = s.addonUrl
+        reloadHere(true)
+    end if
+end sub
+
+' Recarrega o video no mesmo ponto (fonte nova: busca as legendas de novo)
+sub reloadHere(newSource as Boolean)
+    posSec = Int(m.video.position)
+    if posSec > 3 then m.resumeAt = posSec - 2
+    m.skipIntro = true
+    m.switching = true
+    m.video.control = "stop"
+    if newSource then
+        beginPrepare()
+    else
+        showLoading(i18n("loading"))
+        startPlayback()
+    end if
+end sub
+
+' Velocidade: o Roku so tem isso em alguns modelos (campo nao documentado),
+' entao o botao so aparece quando a TV tem o recurso.
+function speedSupported() as Boolean
+    return m.video.hasField("playbackSpeed")
+end function
+
+function speedLabel(v as Float) as String
+    if Abs(v - 1.0) < 0.01 then return i18n("speed_normal")
+    t = Str(v).trim()
+    if Left(t, 1) = "." then t = "0" + t
+    return t + "x"
+end function
+
+sub applySpeed()
+    if not speedSupported() then return
+    m.video.setField("playbackSpeed", m.speed)
+end sub
+
+sub openSpeedPanel()
+    m.panelMode = "speed"
+    m.panelTitle.text = i18n("player_speed")
+    m.panelInfo.text = i18n("speed_hint")
+    labels = []
+    actions = []
+    sel = 0
+    speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+    for i = 0 to speeds.count() - 1
+        v = speeds[i]
+        lbl = speedLabel(v)
+        if Abs(v - m.speed) < 0.01 then
+            lbl = lbl + i18n("q_current")
+            sel = i
+        end if
+        labels.push(lbl)
+        actions.push(Str(v).trim())
+    end for
+    fillMenu(labels, actions)
+    m.menu.jumpToItem = sel
+    openPanelNow()
+end sub
+
+function rateText(bps as Dynamic) as String
+    b = toInt(bps)
+    if b <= 0 then return "-"
+    if b >= 1000000 then return Str(Int(b / 100000) / 10).trim() + " Mbps"
+    return Str(Int(b / 1000)).trim() + " kbps"
+end function
+
+' Relatorio "para nerds": atualiza a cada segundo enquanto o painel esta aberto
+function statsText() as String
+    v = m.video
+    lines = []
+    res = "-"
+    seg = v.streamingSegment
+    if Type(seg) = "roAssociativeArray" and toInt(seg.width) > 0 then
+        res = Str(toInt(seg.width)).trim() + "x" + Str(toInt(seg.height)).trim()
+    else
+        seg = v.downloadedSegment
+        if Type(seg) = "roAssociativeArray" and toInt(seg.Width) > 0 then res = Str(toInt(seg.Width)).trim() + "x" + Str(toInt(seg.Height)).trim()
+    end if
+    lines.push(i18n("nerd_res") + ": " + res)
+    lines.push(i18n("nerd_codecs") + ": " + joinWith([asStr(v.videoFormat), asStr(v.audioFormat)], " / "))
+
+    rate = "-"
+    net = "-"
+    si = v.streamInfo
+    if Type(si) = "roAssociativeArray" then
+        rate = rateText(si.streamBitrate)
+        mb = si.measuredBitrate
+        if mb = invalid then mb = si.measuredBItrate
+        net = rateText(mb)
+    end if
+    lines.push(i18n("nerd_rate") + ": " + rate + "   " + i18n("nerd_net") + ": " + net)
+
+    buf = "-"
+    bs = v.bufferingStatus
+    if Type(bs) = "roAssociativeArray" then
+        if bs.percentage <> invalid then buf = Str(toInt(bs.percentage)).trim() + "%"
+    end if
+    lines.push(i18n("nerd_buffer") + ": " + buf + "   " + i18n("nerd_state") + ": " + asStr(v.state))
+    lines.push(i18n("nerd_pos") + ": " + formatTime(Int(v.position)) + " / " + formatTime(Int(v.duration)))
+    fmt = asStr(m.req.format)
+    if fmt = "" then fmt = "auto"
+    lines.push(i18n("nerd_type") + ": " + fmt + "   " + i18n("player_speed") + ": " + speedLabel(m.speed))
+    lines.push(i18n("nerd_server") + ": " + hostOf(asStr(m.req.url)))
+    if m.altIdx >= 0 then lines.push(i18n("player_source") + ": " + Str(m.altIdx + 1).trim() + " / " + Str(m.alts.count()).trim())
+    return joinWith(lines, Chr(10))
+end function
+
+sub openStatsPanel()
+    m.panelMode = "stats"
+    m.panelTitle.text = i18n("player_stats")
+    m.panelInfo.text = statsText()
+    fillMenu([i18n("player_close")], ["close"])
+    openPanelNow()
 end sub
 
 ' ---------------------------------------------------------------------------

@@ -2,6 +2,21 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [1.5.3]
+
+### Adicionado
+- **Player no estilo YouTube:** novos botões nos controles (Baixo):
+  - **Qualidade:** em HLS/DASH, Automática ou Até 1080p/720p/480p; e "Outra fonte em 4K/1080p/..." troca para outra
+    fonte do mesmo título e continua do mesmo ponto.
+  - **Velocidade:** 0,5x, 0,75x, Normal, 1,25x, 1,5x e 2x (só aparece quando o modelo de Roku tem o recurso).
+  - **Para nerds:** resolução, codecs, taxa do vídeo, conexão, buffer, estado, posição, formato, servidor e número da
+    fonte, atualizados a cada segundo.
+
+### Corrigido
+- **Busca:** ao voltar dos resultados para o teclado (Voltar, Esquerda, Cima ou *), as setas para os lados não
+  moviam o cursor, porque o foco continuava preso na grade de resultados. Agora o foco volta de verdade ao teclado.
+- **Botão Buscar (e Play):** se o texto mudou, busca na hora (sem esperar) e vai para os resultados assim que chegam.
+
 ## [1.5.2]
 
 ### Adicionado

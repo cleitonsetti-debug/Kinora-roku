@@ -8,6 +8,8 @@
 
 sub init()
     m.keysGroup = m.top.findNode("keys")
+    ' no que recebe o foco quando o teclado esta ativo (as teclas sobem dele para esta tela)
+    m.kbFocus = m.top.findNode("kbFocus")
     m.cursor = m.top.findNode("cursor")
     m.grid = m.top.findNode("grid")
     m.queryLabel = m.top.findNode("queryLabel")
@@ -25,6 +27,8 @@ sub init()
     m.hasResults = false
     m.query = ""
     m.focusArea = "kb"
+    m.wantResults = false
+    m.lastSearched = ""
     m.cols = 6
     m.rowsCount = 7
     m.curCol = 0
@@ -112,8 +116,7 @@ sub focusView()
     if m.focusArea = "grid" and m.hasResults then
         m.grid.setFocus(true)
     else
-        m.focusArea = "kb"
-        m.top.setFocus(true)
+        goKeyboard()
     end if
 end sub
 
@@ -123,9 +126,15 @@ sub goResults()
     m.grid.setFocus(true)
 end sub
 
+' Volta ao teclado: tira o foco da grade/lista e entrega a um no proprio do teclado.
+' (Antes o foco ia para a SearchView inteira e, as vezes, ficava preso na grade:
+' as setas para os lados continuavam andando nos resultados escondidos.)
 sub goKeyboard()
     m.focusArea = "kb"
-    m.top.setFocus(true)
+    m.grid.setFocus(false)
+    m.recent.setFocus(false)
+    m.kbFocus.setFocus(true)
+    moveCursor()
 end sub
 
 sub refreshQuery()
@@ -140,9 +149,19 @@ end sub
 
 sub applyKey(def as Object)
     if def.kind = "go" then
-        goResults()
+        ' Buscar: se o texto mudou e a busca ainda nao rodou, busca ja e vai para os resultados quando chegarem
+        if m.query.trim() <> m.lastSearched then
+            m.debounce.control = "stop"
+            m.wantResults = true
+            onDebounce()
+        else if m.hasResults then
+            goResults()
+        else if m.pending > 0 then
+            m.wantResults = true
+        end if
         return
     end if
+    m.wantResults = false
     if def.kind = "char" then
         if Len(m.query) < 60 then m.query = m.query + def.ch
     else if def.kind = "space" then
@@ -163,6 +182,7 @@ end sub
 
 sub onDebounce()
     q = m.query.trim()
+    m.lastSearched = q
     m.gen = m.gen + 1
     if Len(q) < 2 then
         clearResults(i18n("search_hint_min"))
@@ -188,6 +208,8 @@ sub onDebounce()
 end sub
 
 sub clearResults(message as String)
+    m.wantResults = false
+    m.pending = 0
     m.hasResults = false
     m.grid.visible = false
     m.grid.content = CreateObject("roSGNode", "ContentNode")
@@ -247,6 +269,9 @@ sub renderResults()
     m.status.visible = false
     m.recent.visible = false
     m.recentTitle.visible = false
+    m.pending = 0
+    if m.wantResults and m.focusArea = "kb" then goResults()
+    m.wantResults = false
 end sub
 
 sub onGridSelected()
@@ -278,7 +303,8 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         return false
     end if
 
-    ' foco no teclado
+    ' foco no teclado (se o foco ficou na grade por algum motivo, devolve ao teclado)
+    if m.grid.isInFocusChain() or m.recent.isInFocusChain() then goKeyboard()
     if key = "left" then
         if m.curCol > 0 then m.curCol = m.curCol - 1
         moveCursor()
@@ -313,7 +339,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         applyKey({ kind: "space", ch: " " })
         return true
     else if key = "play" then
-        goResults()
+        applyKey({ kind: "go", ch: "" })
         return true
     end if
     return false
